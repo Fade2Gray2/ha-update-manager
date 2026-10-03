@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from .semver import Size
 
 AnnouncementAction = Literal["none", "announce", "execute", "remove"]
-AutoInstallReason = Literal["rules", "trusted_voter"]
+AutoInstallReason = Literal["rules", "trusted_voter", "allow_list"]
 
 
 class AutoInstallRules(NamedTuple):
@@ -62,13 +62,15 @@ def effective_auto_install_state(
     auto_install_excluded: bool,
     trusted_vote: str | None,
     community_problematic_count: int = 0,
+    immediate_allow_listed: bool = False,
 ) -> tuple[bool, bool, AutoInstallReason | None]:
     """(is_ready, auto_install_enabled, reason) after folding in (a) a
     trusted voter's already-aggregated verdict for this exact pending
     version, if any (see community_verdict.py's own async_get_verdict for
     how a list of trusted usernames' individual votes becomes this single
     value -- this function only ever sees the result, never the raw list),
-    and (b) the wider crowd's own raw problematic count. Direct user
+    (b) the wider crowd's own raw problematic count, and (c) whether this
+    entity is on the immediate auto-update allow list. Direct user
     feedback, 2026-07-23 ("installeer altijd automatisch als [klaptafel]
     een update als healthy heeft beoordeeld, ongeacht mijn eigen rules" ->
     confirmed symmetric while planning: a trusted "problematic" verdict
@@ -96,9 +98,17 @@ def effective_auto_install_state(
     2026-07-29, when asked whether a stray untrusted problematic report
     should override a trusted healthy vote -- a trusted voter's own
     judgment should count for something, otherwise trusting them at all is
-    pointless. So this check comes first, unconditionally.
+    pointless. For entities not on the immediate allow list, this preserves
+    the existing precedence unchanged.
 
-    Only once there's no trusted-healthy override in play does
+    The immediate allow list bypasses staging and the size toggle, but not
+    safety evidence: excluded/skipped/blocked entities and entities with a
+    problematic community report remain ineligible. This check precedes
+    the trusted-voter branch so adding an entity to the allow list cannot
+    weaken those gates.
+
+    Only once neither the allow-list rule nor a trusted-healthy override is
+    in play does
     community_problematic_count matter: any problematic vote at all, from
     anyone, however small a minority, blocks eligibility outright -- no
     quorum, no percentage, the same asymmetric-safety reasoning already
@@ -109,12 +119,24 @@ def effective_auto_install_state(
     narrower "a trusted voter's own problematic vote blocks" rule: a
     trusted voter's problematic vote is itself already counted inside the
     aggregate community_problematic_count, so that case no longer needs its
-    own separate branch. Neither this nor the trusted-healthy override
-    changes how decide_action itself sequences announce/execute -- only
-    what feeds into it."""
+    own separate branch. These checks determine eligibility; the immediate
+    flag passed to decide_action separately skips the announcement
+    countdown."""
     is_ready = status == "ready"
     if auto_install_excluded or status == "skipped":
         return is_ready, False, None
+    # The allow list is intentionally narrower than the trusted-voter
+    # override below: it bypasses the user's normal staging/toggle choices,
+    # not safety evidence. A problematic community verdict therefore still
+    # blocks an allow-listed update.
+    if immediate_allow_listed:
+        if community_problematic_count > 0:
+            return is_ready, False, None
+        # Only ordinary waiting/ready staging states can be promoted. Future
+        # exceptional statuses remain fail-closed by default.
+        if status not in ("waiting", "ready"):
+            return is_ready, False, None
+        return True, True, "allow_list"
     if trusted_vote == "healthy":
         return True, True, "trusted_voter"
     if community_problematic_count > 0:
@@ -131,6 +153,7 @@ def needs_manual_action(
     community_problematic_count: int,
     rules: AutoInstallRules,
     master_enabled: bool,
+    immediate_allow_listed: bool = False,
 ) -> bool:
     """True for a "ready" update that won't be auto-installed -- the exact
     set install_manager.py's own periodic tick otherwise leaves for a
@@ -159,6 +182,7 @@ def needs_manual_action(
         auto_install_excluded=auto_install_excluded,
         trusted_vote=trusted_vote,
         community_problematic_count=community_problematic_count,
+        immediate_allow_listed=immediate_allow_listed,
     )
     return not (auto_install_enabled and master_enabled)
 
@@ -181,12 +205,14 @@ def decide_action(
     current_to_version: str,
     now: datetime,
     announce_wait: timedelta,
+    immediate: bool = False,
 ) -> AnnouncementAction:
     """What should happen right now to this entity's pending-install
     announcement?
 
     - "announce": start a new cancellable countdown.
-    - "execute": the countdown elapsed uncancelled -- actually install now.
+    - "execute": the countdown elapsed uncancelled, or this is an immediate
+      allow-list install -- actually install now.
     - "remove": an announcement exists but no longer applies (rule turned
       off, update resolved itself/changed/disappeared, or the user
       cancelled this exact target version) -- clear it, no user action
@@ -230,7 +256,7 @@ def decide_action(
         return "remove" if existing is not None else "none"
 
     if existing is None:
-        return "announce"
+        return "execute" if immediate else "announce"
 
     if existing.to_version != current_to_version:
         # The pending update changed underneath the existing announcement
@@ -238,6 +264,9 @@ def decide_action(
         # -- clear it rather than firing on stale data; a fresh "announce"
         # follows once this same check runs again with existing=None.
         return "remove"
+
+    if immediate:
+        return "execute"
 
     if now >= existing.execute_at:
         return "execute"

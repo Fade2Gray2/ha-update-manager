@@ -149,6 +149,9 @@ export const TRANSLATIONS = {
     field_excluded_entities: "Always manual",
     field_excluded_entities_helper:
       "Still shown normally in Updates and History. Update Manager just never auto-installs these, regardless of what's configured above.",
+    field_immediate_auto_update_entities: "Immediate Auto-Update Allow List",
+    field_immediate_auto_update_entities_helper:
+      "Installs these updates immediately, without the normal staging delay or size-based auto-update toggle. Safety blocks, exclusions, skips, pauses and cancellations still apply.",
     field_wait_days_unit: "days",
     field_auto_install: "Update automatically",
     auto_install_section_title: "Auto-update",
@@ -270,6 +273,7 @@ export const TRANSLATIONS = {
     // Home Assistant entirely, only noticed here after the fact.
     dialog_history_method_external: "External",
     dialog_history_method_rules: "Automatic, your own rules",
+    dialog_history_method_allow_list: "Automatic, immediate allow list",
     dialog_history_method_trusted: (names) => `Automatic, trusted vote from ${names}`,
     dialog_history_backup_label: "Backup",
     dialog_history_backup_yes: "Taken before installing",
@@ -527,6 +531,9 @@ export const TRANSLATIONS = {
     field_excluded_entities: "Altijd handmatig",
     field_excluded_entities_helper:
       "Blijven gewoon zichtbaar bij Updates en Historie. Update Manager installeert ze alleen nooit automatisch, ongeacht wat je hierboven instelt.",
+    field_immediate_auto_update_entities: "Lijst voor directe automatische updates",
+    field_immediate_auto_update_entities_helper:
+      "Installeert deze updates direct, zonder de normale uitsteltermijn of grootte-instelling. Veiligheidsblokkades, uitsluitingen, overslaan, pauzeren en annuleren blijven gelden.",
     field_wait_days_unit: "dagen",
     field_auto_install: "Automatisch updaten",
     auto_install_section_title: "Auto-update",
@@ -594,6 +601,7 @@ export const TRANSLATIONS = {
     dialog_history_method_manual: "Handmatig",
     dialog_history_method_external: "Extern",
     dialog_history_method_rules: "Automatisch, je eigen regels",
+    dialog_history_method_allow_list: "Automatisch, lijst voor directe updates",
     dialog_history_method_trusted: (names) => `Automatisch, vertrouwde stem van ${names}`,
     dialog_history_backup_label: "Back-up",
     dialog_history_backup_yes: "Gemaakt voor het installeren",

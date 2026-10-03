@@ -150,6 +150,51 @@ class TestEffectiveAutoInstallState:
             status="skipped", size_enabled=True, auto_install_excluded=False, trusted_vote="healthy"
         ) == (False, False, None)
 
+    def test_allow_list_bypasses_wait_and_size_toggle(self):
+        assert announcer.effective_auto_install_state(
+            status="waiting",
+            size_enabled=False,
+            auto_install_excluded=False,
+            trusted_vote=None,
+            immediate_allow_listed=True,
+        ) == (True, True, "allow_list")
+
+    def test_allow_list_still_respects_hard_status_and_exclusion_gates(self):
+        for status in ("skipped", "blocked"):
+            assert announcer.effective_auto_install_state(
+                status=status,
+                size_enabled=False,
+                auto_install_excluded=False,
+                trusted_vote=None,
+                immediate_allow_listed=True,
+            )[1:] == (False, None)
+        assert announcer.effective_auto_install_state(
+            status="waiting",
+            size_enabled=False,
+            auto_install_excluded=True,
+            trusted_vote=None,
+            immediate_allow_listed=True,
+        )[1:] == (False, None)
+
+    def test_allow_list_still_respects_community_problematic_gate(self):
+        assert announcer.effective_auto_install_state(
+            status="waiting",
+            size_enabled=False,
+            auto_install_excluded=False,
+            trusted_vote=None,
+            community_problematic_count=1,
+            immediate_allow_listed=True,
+        ) == (False, False, None)
+
+    def test_non_allow_listed_trusted_vote_behavior_is_unchanged(self):
+        assert announcer.effective_auto_install_state(
+            status="blocked",
+            size_enabled=False,
+            auto_install_excluded=False,
+            trusted_vote="healthy",
+            community_problematic_count=1,
+        ) == (True, True, "trusted_voter")
+
 
 class TestNeedsManualAction:
     RULES_ALL_ENABLED = announcer.AutoInstallRules(
@@ -261,6 +306,21 @@ class TestNeedsManualAction:
             is True
         )
 
+    def test_allow_listed_ready_update_is_not_manual_when_unpaused(self):
+        assert (
+            announcer.needs_manual_action(
+                status="ready",
+                version_size="large",
+                auto_install_excluded=False,
+                trusted_vote=None,
+                community_problematic_count=0,
+                rules=self.RULES_ALL_DISABLED,
+                master_enabled=True,
+                immediate_allow_listed=True,
+            )
+            is False
+        )
+
 
 class TestDecideAction:
     def test_not_ready_with_no_existing_announcement_does_nothing(self):
@@ -307,6 +367,56 @@ class TestDecideAction:
             now=NOW, announce_wait=WAIT,
         )
         assert action == "announce"
+
+    def test_immediate_eligible_executes_without_announcement(self):
+        action = announcer.decide_action(
+            is_ready=True,
+            auto_install_enabled=True,
+            master_enabled=True,
+            installable=True,
+            existing=None,
+            cancelled_to_version=None,
+            current_to_version="2.0.0",
+            now=NOW,
+            announce_wait=WAIT,
+            immediate=True,
+        )
+        assert action == "execute"
+
+    def test_immediate_existing_countdown_executes_early(self):
+        action = announcer.decide_action(
+            is_ready=True,
+            auto_install_enabled=True,
+            master_enabled=True,
+            installable=True,
+            existing=_existing(),
+            cancelled_to_version=None,
+            current_to_version="2.0.0",
+            now=NOW,
+            announce_wait=WAIT,
+            immediate=True,
+        )
+        assert action == "execute"
+
+    def test_immediate_still_respects_paused_non_installable_and_cancelled(self):
+        common = dict(
+            is_ready=True,
+            auto_install_enabled=True,
+            existing=None,
+            current_to_version="2.0.0",
+            now=NOW,
+            announce_wait=WAIT,
+            immediate=True,
+        )
+        assert announcer.decide_action(
+            **common, master_enabled=False, installable=True, cancelled_to_version=None
+        ) == "none"
+        assert announcer.decide_action(
+            **common, master_enabled=True, installable=False, cancelled_to_version=None
+        ) == "none"
+        assert announcer.decide_action(
+            **common, master_enabled=True, installable=True, cancelled_to_version="2.0.0"
+        ) == "none"
 
     def test_existing_announcement_not_yet_due_does_nothing(self):
         action = announcer.decide_action(

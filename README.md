@@ -30,6 +30,8 @@ auto-install and most of that becomes something you never have to think about ag
   never reflash all at once.
 * **Auto-install that still asks first.** A cancellable countdown announces what's coming and when, with
   an automatic backup when the update supports one, and a master switch to pause all of it in one click.
+* **Immediate updates where you want them.** Put selected `update` entities on the Immediate Auto-Update
+  Allow List to bypass their normal staging delay and size toggle while retaining every safety block.
 * **Release notes worth reading.** Real GitHub notes, compiled across every version a jump skips over, plus
   a wrapped app's own upstream notes (Zigbee2MQTT, Mealie, Matterbridge) alongside the short version.
 * **A panel that feels like it's always been there.** Live progress, a full History audit trail, and an
@@ -71,11 +73,14 @@ For a specific entity's pending update, in this exact order:
    and OS updates start out as pre-populated members of Excluded entities, so they stay manual by
    default too, but you can remove them from that list if you want them eligible for auto-install
    like anything else.
-2. **A trusted voter's "healthy" vote on this exact jump wins outright**, skipping the waiting period and
+2. **The Immediate Auto-Update Allow List bypasses timing, not safety.** A selected entity skips its normal
+   staging delay, announcement countdown, and per-size auto-update toggle, but remains blocked when it is
+   excluded, skipped, blocked, community-problematic, non-installable, paused, or cancelled.
+3. **A trusted voter's "healthy" vote on this exact jump wins outright**, skipping the waiting period and
    the per-size toggle, even over someone else's problem report on the same jump.
-3. **Any problematic community vote blocks it** (unless step 2 already overrode it): one vote, from
+4. **Any problematic community vote blocks it** (unless step 3 already overrode it): one vote, from
    anyone, is enough. No quorum, no percentage, and no trusted voters need to be configured for this.
-4. **Otherwise, your own size-based rules apply**: waiting period elapsed, size toggle on, announce, then
+5. **Otherwise, your own size-based rules apply**: waiting period elapsed, size toggle on, announce, then
    install.
 
 A blocked update shows an "Auto-install held back" alert on its dialog, naming the trusted voter or the
@@ -153,8 +158,9 @@ every 15 minutes.
 
 ## Known limitations
 
-* Staging rules apply per update *size* (small/medium/large), not per individual entity: an entity can be
-  excluded entirely, but can't get its own, different waiting period.
+* Staging rules apply per update *size* (small/medium/large), not per individual entity. An entity can be
+  excluded entirely or placed on the Immediate Auto-Update Allow List, but can't get its own custom
+  waiting period.
 * Voting only works for entities identifiable as a HACS integration, Home Assistant Core/Supervisor/OS,
   a recognized Zigbee device model, or an app.
 * Voting requires linking a GitHub account (a quick one-time device-flow step); reading verdicts doesn't.

@@ -33,6 +33,7 @@ from .announcer import (
 from .const import (
     CONF_ANNOUNCE_HOURS,
     CONF_LARGE_AUTO_INSTALL,
+    CONF_IMMEDIATE_AUTO_UPDATE_ENTITIES,
     CONF_MEDIUM_AUTO_INSTALL,
     CONF_SMALL_AUTO_INSTALL,
     DEFAULT_ANNOUNCE_HOURS,
@@ -127,6 +128,10 @@ def auto_install_rules_from_options(options: dict) -> AutoInstallRules:
     )
 
 
+def immediate_auto_update_entities_from_options(options: dict) -> frozenset[str]:
+    return frozenset(options.get(CONF_IMMEDIATE_AUTO_UPDATE_ENTITIES, []))
+
+
 def _friendly_name(hass: HomeAssistant, entity_id: str) -> str:
     """A trailing " Update" (HA's own default entity name for the update
     platform, e.g. "Music Assistant Update") reads redundantly right next
@@ -146,10 +151,12 @@ class InstallManager:
         coordinator: UpdateManagerCoordinator,
         rules: AutoInstallRules,
         rollout_manager: RolloutManager,
+        immediate_auto_update_entities: frozenset[str] = frozenset(),
     ) -> None:
         self.hass = hass
         self._coordinator = coordinator
         self._rules = rules
+        self._immediate_auto_update_entities = immediate_auto_update_entities
         # Gates every auto-install dispatch below, a no-op for anything
         # that isn't part of an active multi-device Zigbee rollout (see
         # rollout_manager.py's own docstring), so this is invisible for the
@@ -171,7 +178,8 @@ class InstallManager:
         # once the entity's installed_version actually changes, from
         # coordinator.py) tell install_log.py whether *this* completed
         # install was auto-install's doing or a manual click elsewhere, and
-        # if so, why (own rules vs. a trusted vote, and when it was
+        # if so, why (own rules vs. a trusted vote vs. the immediate allow
+        # list, and when it was
         # announced). Not persisted: only meaningful for the brief window
         # between dispatching and the entity's own state catching up.
         self._recently_executed: dict[str, AutoInstallContext] = {}
@@ -257,12 +265,22 @@ class InstallManager:
         # the new "skipped" status on the next timer tick.
         self._unsub_coordinator_listener = self._coordinator.async_add_listener(self._on_recompute)
 
-    def update_rules(self, rules: AutoInstallRules) -> None:
+    def update_rules(
+        self,
+        rules: AutoInstallRules,
+        immediate_auto_update_entities: frozenset[str] | None = None,
+    ) -> None:
         """Applies newly-saved auto-install rules in place -- no reload
         needed, see coordinator.py's async_update_rules for the same
         reasoning. The next periodic tick (at most 5 minutes away) picks
         this up naturally."""
         self._rules = rules
+        if immediate_auto_update_entities is not None:
+            self._immediate_auto_update_entities = immediate_auto_update_entities
+
+    async def async_recheck(self) -> None:
+        """Re-evaluate immediately after a live settings change."""
+        await self._async_tick(dt_util.utcnow())
 
     async def async_set_master_enabled(self, enabled: bool) -> None:
         """Applied immediately, not left to the next periodic tick (up to 5
@@ -450,21 +468,26 @@ class InstallManager:
         # size's own toggle below, and any problematic vote at all (from
         # anyone, not just a trusted voter -- coordinator.py's own
         # community_verdict.problematic_count) blocks eligibility outright
-        # unless a trusted "healthy" override already applies -- see
+        # unless a trusted "healthy" override already applies. Immediate
+        # allow-list eligibility is deliberately stricter: it never
+        # overrides blocked status or problematic community evidence. See
         # effective_auto_install_state's own docstring for the full
         # reasoning (including why a "healthy" override still respects
         # auto_install_excluded and an explicit user skip).
         if cached:
             size_enabled = size_auto_install_enabled(cached["version_size"], self._rules)
+            immediate_allow_listed = entity_id in self._immediate_auto_update_entities
             is_ready, rules_enabled, reason = effective_auto_install_state(
                 status=cached["status"],
                 size_enabled=size_enabled,
                 auto_install_excluded=cached["auto_install_excluded"],
                 trusted_vote=cached.get("trusted_vote"),
                 community_problematic_count=(cached.get("community_verdict") or {}).get("problematic_count", 0),
+                immediate_allow_listed=immediate_allow_listed,
             )
             trusted_voter_usernames = cached.get("trusted_voters_matched", []) if reason == "trusted_voter" else []
         else:
+            immediate_allow_listed = False
             is_ready, rules_enabled, reason, trusted_voter_usernames = False, False, None, []
 
         action = decide_action(
@@ -477,6 +500,7 @@ class InstallManager:
             current_to_version=current_to_version,
             now=now,
             announce_wait=self._rules.announce_wait,
+            immediate=immediate_allow_listed,
         )
 
         if action == "announce":

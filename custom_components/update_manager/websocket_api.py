@@ -30,6 +30,7 @@ from .const import (
     CONF_ENABLED,
     CONF_EXCLUDED_ENTITIES,
     CONF_HIDE_POSTPONED,
+    CONF_IMMEDIATE_AUTO_UPDATE_ENTITIES,
     CONF_LARGE_AUTO_INSTALL,
     CONF_LARGE_WAIT_DAYS,
     CONF_MEDIUM_AUTO_INSTALL,
@@ -68,7 +69,7 @@ from .device_identity import resolve_full_identity
 from .github_release_notes import find_release_by_version, parse_release_url, select_release_range
 from .hacs_identity import ResolvedIdentity, corrected_release_url
 from .install_log_retention import DEFAULT_PAGE_POLICY, entries_to_keep_full_notes
-from .install_manager import auto_install_rules_from_options
+from .install_manager import auto_install_rules_from_options, immediate_auto_update_entities_from_options
 from .runtime_data import UpdateManagerData, get_data as _get_data, get_entry as _get_entry
 from .semver import strip_version_prefix
 from .vote_issue_body import REASON_CATEGORIES
@@ -114,7 +115,9 @@ async def async_apply_options(hass: HomeAssistant, options: dict) -> None:
     await data.coordinator.async_update_rules(
         rules_from_options(options), excluded_entities_from_options(options), schedule_from_options(options)
     )
-    data.install_manager.update_rules(auto_install_rules_from_options(options))
+    data.install_manager.update_rules(
+        auto_install_rules_from_options(options), immediate_auto_update_entities_from_options(options)
+    )
     data.community_verdict_manager.set_trusted_voters(trusted_voters_from_options(options))
 
     async def _apply_staging_skip() -> None:
@@ -131,6 +134,10 @@ async def async_apply_options(hass: HomeAssistant, options: dict) -> None:
         # happening despite the pause.
         data.rollout_manager.async_set_master_enabled(master_enabled),
     )
+    # A newly allow-listed waiting update must act now, not at the next
+    # five-minute timer. This also awaits any pending cleanup caused by
+    # removing an entity from the list before save_settings returns.
+    await data.install_manager.async_recheck()
 
 
 @callback
@@ -936,6 +943,7 @@ def _handle_get_settings(hass: HomeAssistant, connection: websocket_api.ActiveCo
                 vol.Required(CONF_LARGE_AUTO_INSTALL): bool,
                 vol.Required(CONF_ANNOUNCE_HOURS): vol.All(vol.Coerce(int), vol.Range(min=1, max=336)),
                 vol.Required(CONF_EXCLUDED_ENTITIES): [str],
+                vol.Required(CONF_IMMEDIATE_AUTO_UPDATE_ENTITIES): [str],
                 vol.Required(CONF_HIDE_POSTPONED): bool,
                 vol.Required(CONF_SHOW_SKIPPED_UPDATES): bool,
                 vol.Required(CONF_SHOW_NOT_INSTALLABLE_UPDATES): bool,

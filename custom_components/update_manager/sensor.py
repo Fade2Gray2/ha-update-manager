@@ -31,6 +31,7 @@ from .announcer import needs_manual_action
 from .const import DOMAIN
 from .coordinator import UpdateManagerCoordinator
 from .device import device_info
+from .const import CONF_IMMEDIATE_AUTO_UPDATE_ENTITIES
 from .install_manager import auto_install_rules_from_options
 from .runtime_data import UpdateManagerConfigEntry
 from .update_status import STATUSES, categorize_updates, icon_for_status
@@ -152,6 +153,7 @@ class UpdateManagerNeedsManualActionSensor(SensorEntity):
         # separate listener of its own required.
         ready = categorize_updates(list(self._coordinator.cache.values())).get("ready", [])
         rules = auto_install_rules_from_options(self._entry.options)
+        immediate_entities = frozenset(self._entry.options.get(CONF_IMMEDIATE_AUTO_UPDATE_ENTITIES, []))
         bucket = [
             u
             for u in ready
@@ -163,6 +165,7 @@ class UpdateManagerNeedsManualActionSensor(SensorEntity):
                 community_problematic_count=(u.get("community_verdict") or {}).get("problematic_count", 0),
                 rules=rules,
                 master_enabled=self._coordinator.master_enabled,
+                immediate_allow_listed=u.get("entity_id") in immediate_entities,
             )
         ]
         self._attr_native_value = len(bucket)

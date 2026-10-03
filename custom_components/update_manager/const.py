@@ -107,6 +107,13 @@ WEEKDAY_READY_OPTION_KEYS: tuple[tuple[str, str], ...] = tuple(
 # about *which* entities, not a wait/auto-install tuning value.
 CONF_EXCLUDED_ENTITIES = "excluded_entities"
 
+# User-picked update entities that should install as soon as they are
+# available, without waiting for staging or requiring their version-size
+# auto-install toggle. InstallManager still applies every hard safety gate
+# (exclusion, skip/block/community verdict, installability, pause and
+# cancellation) before dispatching them through its normal execution path.
+CONF_IMMEDIATE_AUTO_UPDATE_ENTITIES = "immediate_auto_update_entities"
+
 # On by default (changed 2026-07-21, direct user feedback), opt-out rather
 # than opt-in. Not part of any profile preset (same reasoning as
 # CONF_EXCLUDED_ENTITIES above: a behavior toggle, not a wait/auto-install

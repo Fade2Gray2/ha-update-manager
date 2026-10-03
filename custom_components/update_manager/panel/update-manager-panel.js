@@ -300,6 +300,7 @@ function knownSettingsFields() {
     "enabled",
     "announce_hours",
     "excluded_entities",
+    "immediate_auto_update_entities",
     "hide_postponed",
     "show_skipped_updates",
     "show_not_installable_updates",
@@ -327,7 +328,7 @@ function knownSettingsFields() {
 // time only -- not from _formData/the live widget's own state, which would
 // delete ha-input-multi's freshly-added blank row before the user can type
 // into it (found live, 2026-08-11).
-const LIST_SETTINGS_FIELDS = new Set(["excluded_entities", "trusted_voters"]);
+const LIST_SETTINGS_FIELDS = new Set(["excluded_entities", "immediate_auto_update_entities", "trusted_voters"]);
 
 function pickKnownSettings(data) {
   const known = knownSettingsFields();
@@ -412,6 +413,10 @@ function communityBlocksAutoInstall(u) {
   return ((u.community_verdict && u.community_verdict.problematic_count) || 0) > 0;
 }
 
+function isImmediateAutoUpdateEntity(u, settings) {
+  return !!settings?.immediate_auto_update_entities?.includes(u.entity_id);
+}
+
 // Will this update ever auto-install itself, as currently configured?
 // Installable, not excluded (hard or user-picked), and the *_auto_install
 // setting for its size is on. `settings` is the saved settings object
@@ -424,6 +429,10 @@ function autoInstallEnabledFor(u, settings) {
   // showing a "will update automatically" projection while paused would be
   // actively misleading, since nothing will actually happen.
   if (!settings || settings.enabled === false || !u.installable || u.auto_install_excluded) return false;
+  if (isImmediateAutoUpdateEntity(u, settings)) {
+    if (u.status === "blocked" || u.status === "skipped" || u.auto_install_cancelled) return false;
+    return ((u.community_verdict && u.community_verdict.problematic_count) || 0) === 0;
+  }
   if (communityBlocksAutoInstall(u)) return false;
   return !!settings[`${u.version_size}_auto_install`];
 }
@@ -449,6 +458,7 @@ function autoInstallEnabledFor(u, settings) {
 // so the dialog kept showing the exact same projection and Cancel button
 // right after clicking it, reading as "cancel doesn't do anything".
 function projectedAutoInstallTime(u, settings) {
+  if (isImmediateAutoUpdateEntity(u, settings)) return null;
   if (u.status !== "waiting" || u.remaining_seconds == null) return null;
   if (u.auto_install_cancelled) return null;
   if (!autoInstallEnabledFor(u, settings) || settings.announce_hours == null) return null;
@@ -897,6 +907,7 @@ function installMethodText(tr, entry) {
     return tr.dialog_history_method_trusted(joinUsernames(tr, entry.trusted_voter_usernames || []));
   }
   if (entry.auto_install_reason === "rules") return tr.dialog_history_method_rules;
+  if (entry.auto_install_reason === "allow_list") return tr.dialog_history_method_allow_list;
   return tr.dialog_history_auto;
 }
 
@@ -2057,7 +2068,7 @@ class UpdateManagerPanel extends HTMLElement {
         // vol.Required(...) schema rejected that outright ("required key
         // not provided"), found live. excluded_entities/trusted_voters
         // aren't part of it (plain lists, not wait/auto-install tuning
-        // values), so both need their own explicit empty-array default the
+        // values), so these lists need their own explicit empty-array default the
         // same way.
         const fallback = this._defaults || {};
         // The postponement schedule's own 14 fields default to disabled/
@@ -2075,6 +2086,7 @@ class UpdateManagerPanel extends HTMLElement {
         this._formData = {
           enabled: true,
           excluded_entities: [],
+          immediate_auto_update_entities: [],
           trusted_voters: [],
           hide_postponed: true,
           show_skipped_updates: true,
@@ -6923,6 +6935,37 @@ class UpdateManagerPanel extends HTMLElement {
       this._scheduleAutosave();
     });
     body.appendChild(entitiesForm);
+
+    body.appendChild(document.createElement("hr")).className = "divider";
+
+    const immediateLabel = document.createElement("p");
+    immediateLabel.className = "field-label";
+    immediateLabel.textContent = tr.field_immediate_auto_update_entities;
+    body.appendChild(immediateLabel);
+
+    const immediateHint = document.createElement("p");
+    immediateHint.className = "hint";
+    immediateHint.textContent = tr.field_immediate_auto_update_entities_helper;
+    body.appendChild(immediateHint);
+
+    const immediateForm = document.createElement("ha-form");
+    immediateForm.hass = this._hass;
+    immediateForm.schema = [
+      {
+        name: "immediate_auto_update_entities",
+        selector: { entity: { multiple: true, filter: { domain: "update" } } },
+      },
+    ];
+    immediateForm.data = this._formData;
+    immediateForm.computeLabel = () => "";
+    immediateForm.computeHelper = () => "";
+    immediateForm.addEventListener("value-changed", (e) => {
+      const chosen = e.detail.value.immediate_auto_update_entities || [];
+      this._formData = { ...this._formData, immediate_auto_update_entities: chosen };
+      immediateForm.data = this._formData;
+      this._scheduleAutosave();
+    });
+    body.appendChild(immediateForm);
 
     // Same divider treatment as every other subsection boundary now
     // (direct user feedback, 2026-08-11) -- trusted voters is its own

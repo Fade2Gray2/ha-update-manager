@@ -13,6 +13,7 @@ from .const import (
     CONF_ENABLED,
     CONF_EXCLUDED_ENTITIES,
     CONF_HIDE_POSTPONED,
+    CONF_IMMEDIATE_AUTO_UPDATE_ENTITIES,
     CONF_LARGE_AUTO_INSTALL,
     CONF_LARGE_WAIT_DAYS,
     DOMAIN,
@@ -29,7 +30,11 @@ from .device import device_info as update_manager_device_info
 from .github_auth import GitHubAuthManager
 from .hacs_identity import corrected_release_url
 from .install_log import InstallLog
-from .install_manager import InstallManager, auto_install_rules_from_options
+from .install_manager import (
+    InstallManager,
+    auto_install_rules_from_options,
+    immediate_auto_update_entities_from_options,
+)
 from .my_votes import MyVotesManager
 from .panel import async_register_update_manager_panel
 from .rollout_manager import RolloutManager
@@ -198,7 +203,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: UpdateManagerConfigEntry
     # install dispatch, and staging_skip.py hides a queued entry the same
     # way it already hides a plain "waiting" one).
     rollout_manager = RolloutManager(hass, coordinator)
-    install_manager = InstallManager(hass, coordinator, auto_install_rules_from_options(options), rollout_manager)
+    install_manager = InstallManager(
+        hass,
+        coordinator,
+        auto_install_rules_from_options(options),
+        rollout_manager,
+        immediate_auto_update_entities_from_options(options),
+    )
     staging_skip_manager = StagingSkipManager(hass, coordinator, rollout_manager)
     # The reverse direction: only wireable once install_manager exists, see
     # rollout_manager.py's own set_recently_executed_setter docstring for
@@ -406,21 +417,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: UpdateManagerConfigEntry
             rollout_manager.async_rename_entity(old_entity_id, new_entity_id),
             staging_skip_manager.async_rename_entity(old_entity_id, new_entity_id),
         )
-        # excluded_entities lives in the config entry's own options (a
-        # user's Settings-tab picker choice), not in one of the Store-backed
-        # managers above -- found by code review, 2026-08-18: without this,
-        # a rename silently dropped the entity out of its own auto-install
-        # exclusion, re-enabling auto-install for it without the user ever
-        # touching that setting. Persisted through entry.options (not
-        # coordinator.excluded_entities directly) so it goes through the
-        # exact same apply path every other options change already does --
-        # update_listener -> async_apply_options -> coordinator.async_update_rules.
-        excluded = list(entry.options.get(CONF_EXCLUDED_ENTITIES, []))
-        if old_entity_id in excluded:
-            excluded = [new_entity_id if e == old_entity_id else e for e in excluded]
-            hass.config_entries.async_update_entry(
-                entry, options={**entry.options, CONF_EXCLUDED_ENTITIES: excluded}
-            )
+        # The exclusion and immediate allow lists live in the config entry's
+        # own options (Settings-tab picker choices), not in one of the
+        # Store-backed managers above. Without this, a rename silently drops
+        # the entity's saved behavior. Persist through entry.options so the
+        # existing update_listener -> async_apply_options path applies both
+        # lists live.
+        options = dict(entry.options)
+        changed = False
+        for option_key in (CONF_EXCLUDED_ENTITIES, CONF_IMMEDIATE_AUTO_UPDATE_ENTITIES):
+            entity_ids = list(options.get(option_key, []))
+            if old_entity_id in entity_ids:
+                options[option_key] = [new_entity_id if e == old_entity_id else e for e in entity_ids]
+                changed = True
+        if changed:
+            hass.config_entries.async_update_entry(entry, options=options)
 
     @callback
     def _on_entity_registry_updated(event) -> None:
